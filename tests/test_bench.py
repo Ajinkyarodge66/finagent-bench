@@ -115,3 +115,23 @@ def test_failure_report_explains_wrong_answers():
     r = evaluate(LLMAgent(lambda s, m: next(script), name="x"), [task])
     assert r["rows"][0]["failure"] == "mental_arithmetic"
     assert "Expected" in failure_report(r)
+
+
+def test_native_tool_calls_are_translated(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test")
+    seen = []
+
+    def fake_urlopen(req, timeout):
+        seen.append(json.loads(req.data))
+        call = {"function": {"name": "repo.read_doc", "arguments": '{"arg": "a.txt"}'}}
+        return _Resp(json.dumps({"choices": [{"message": {"content": None, "tool_calls": [call]}}]}).encode())
+
+    complete = openai_compat_backend("groq", "m", rpm=0, _urlopen=fake_urlopen)
+    assert json.loads(complete("s", [])) == {"tool": "read_doc", "arg": "a.txt"}
+    assert {t["function"]["name"] for t in seen[0]["tools"]} == {"list_docs", "read_doc", "calculator", "final_answer"}
+
+
+def test_final_answer_tool_call():
+    from finagent_bench.backends import tool_call_to_json
+    out = tool_call_to_json({"function": {"name": "final_answer", "arguments": '{"value": 12.5}'}})
+    assert json.loads(out) == {"final_answer": 12.5}

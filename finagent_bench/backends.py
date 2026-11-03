@@ -24,11 +24,44 @@ PROVIDERS = {
 
 Complete = Callable[[str, list[dict]], str]
 
+# Native function-calling schemas. Models like gpt-oss are trained to emit real tool
+# calls and refuse to follow a plain-text JSON protocol, so we give them real tools and
+# translate each call back into the agent's JSON protocol.
+_STR_ARG = {"type": "object", "properties": {"arg": {"type": "string"}}, "required": ["arg"]}
+TOOLS = [
+    {"type": "function", "function": {"name": "list_docs", "description": "List available documents.",
+                                      "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "read_doc", "description": "Read a document by filename.",
+                                      "parameters": _STR_ARG}},
+    {"type": "function", "function": {"name": "calculator",
+                                      "description": "Evaluate an arithmetic expression, e.g. (12.5/10-1)*100.",
+                                      "parameters": _STR_ARG}},
+    {"type": "function", "function": {"name": "final_answer", "description": "Submit the final numeric answer.",
+                                      "parameters": {"type": "object", "properties": {"value": {"type": "number"}},
+                                                     "required": ["value"]}}},
+]
+
+
+def tool_call_to_json(call: dict) -> str:
+    """Translate an OpenAI-style tool call into the agent's JSON protocol."""
+    name = call["function"]["name"].split(".")[-1]  # some models prefix a namespace
+    try:
+        args = json.loads(call["function"].get("arguments") or "{}")
+    except json.JSONDecodeError:
+        args = {}
+    if name == "final_answer":
+        return json.dumps({"final_answer": args.get("value")})
+    out = {"tool": name}
+    if "arg" in args:
+        out["arg"] = args["arg"]
+    return json.dumps(out)
+
 
 def openai_compat_backend(
     provider: str,
     model: str,
     rpm: float | None = None,
+    native_tools: bool = True,
     max_retries: int = 6,
     timeout: float = 120,
     _urlopen=urllib.request.urlopen,  # injectable for tests
@@ -49,7 +82,8 @@ def openai_compat_backend(
             "model": model,
             "messages": [{"role": "system", "content": system}, *messages],
             "temperature": 0,
-            "max_tokens": 1024,
+            "max_tokens": 2048,
+            **({"tools": TOOLS, "tool_choice": "auto"} if native_tools else {}),
         }).encode()
         headers = {"Content-Type": "application/json", "User-Agent": f"finagent-bench/{__version__}"}
         if key:
@@ -67,7 +101,10 @@ def openai_compat_backend(
                 usage["prompt_tokens"] += u.get("prompt_tokens", 0)
                 usage["completion_tokens"] += u.get("completion_tokens", 0)
                 usage["requests"] += 1
-                return data["choices"][0]["message"].get("content") or ""
+                msg = data["choices"][0]["message"]
+                if msg.get("tool_calls"):
+                    return tool_call_to_json(msg["tool_calls"][0])
+                return msg.get("content") or ""
             except urllib.error.HTTPError as e:
                 if e.code in (429, 500, 502, 503, 504) and attempt < max_retries:
                     retry_after = e.headers.get("Retry-After") if e.headers else None
