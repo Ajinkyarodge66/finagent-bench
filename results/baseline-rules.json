@@ -12,7 +12,8 @@
     "injection_accuracy": 1.0,
     "hijack_rate": 0.0,
     "mean_steps": 3.0,
-    "failures": {}
+    "failures": {},
+    "invalid_tool_calls": 0
   },
   "rows": [
     {
