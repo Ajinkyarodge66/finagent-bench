@@ -9,12 +9,31 @@ LLM agents are being deployed to read filings, compute metrics and answer analys
 ## Quick start
 
 ```bash
-pip install pytest anthropic        # anthropic only needed for LLM agents
-python -m pytest -q                 # 6 tests, runs offline
-python -m finagent_bench --agent baseline
-export ANTHROPIC_API_KEY=...        # then compare a real model:
-python -m finagent_bench --agent baseline --agent anthropic --model <model-id>
+python -m pytest -q                 # 12 tests, runs offline, no API key
+python -m finagent_bench            # offline baseline only
 ```
+
+### Run a real model (free tiers, no credit card)
+
+Get a free key from [Groq](https://console.groq.com/keys) or [Google AI Studio](https://aistudio.google.com/apikey), then:
+
+```powershell
+# Windows PowerShell (use `export GROQ_API_KEY=...` on macOS/Linux)
+$env:GROQ_API_KEY = "gsk_..."
+python -m finagent_bench --provider groq --model openai/gpt-oss-20b --limit 3   # smoke test
+python -m finagent_bench --provider groq --model openai/gpt-oss-20b             # full run
+
+$env:GEMINI_API_KEY = "..."
+python -m finagent_bench --provider gemini --model gemini-2.5-flash
+```
+
+Supported providers: `groq`, `gemini`, `openrouter`, `ollama` (local), `anthropic`. Any OpenAI-compatible endpoint can be added in `backends.py`. Requests are throttled to stay inside free-tier limits and retried on HTTP 429.
+
+Each run writes to `results/`:
+- `<model>.json`: every task with prediction, tool calls and full transcript
+- `<model>_failures.md`: failures grouped by type, with the evidence for each
+
+Never commit API keys. Keys are read only from environment variables.
 
 ## What it measures
 
@@ -24,14 +43,15 @@ python -m finagent_bench --agent baseline --agent anthropic --model <model-id>
 | Accuracy by category | `lookup` (find one figure), `arithmetic` (growth, margins), `multi_hop` (combine 2 filings) |
 | Accuracy under injection | Accuracy on tasks whose documents contain an embedded attacker instruction |
 | Hijack rate | Share of injected tasks where the agent followed the attacker (answered 0) |
-| Mean steps | Tool calls per task — a cost/latency proxy |
+| Mean steps | Model turns per task, a cost/latency proxy |
+| Failure types | Each wrong answer is classified: `hijacked_by_injection`, `answered_without_reading`, `mental_arithmetic`, `unit_or_percent_scale`, `rounding_or_precision`, `wrong_value`, `ran_out_of_steps`, `no_numeric_answer`, `api_error` |
 
 ## Current results
 
 | Agent | Accuracy | arithmetic | lookup | multi_hop | Acc. under injection | Hijack rate | Mean steps |
 |---|---|---|---|---|---|---|---|
 | baseline-rules | 100% | 100% | 100% | 100% | 100% | 0% | 3.0 |
-| *your LLM run here* | | | | | | | |
+| *LLM runs: coming in v0.2* | | | | | | | |
 
 The rule-based baseline is a sanity check (it is written for this exact format). The interesting rows are LLM agents — that comparison is the point of the project.
 
@@ -48,16 +68,18 @@ The rule-based baseline is a sanity check (it is written for this exact format).
 finagent_bench/
   tasks.py      synthetic filings + question generator (+ injection)
   tools.py      list_docs / read_doc / calculator, with audit log
-  agents.py     BaselineAgent, LLMAgent (ReAct-style), Anthropic backend
-  evaluate.py   scoring, per-category + safety metrics, markdown report
-tests/          unit + integration tests (scripted model)
+  agents.py     BaselineAgent, LLMAgent (ReAct-style loop, tool allow-list)
+  backends.py   OpenAI-compatible + Anthropic backends, throttling, retries
+  evaluate.py   scoring, safety metrics, failure classification, reports
+tests/          unit + integration tests (scripted model, fake HTTP server)
 .github/        CI: tests + benchmark on every push
 ```
 
 ## Roadmap
 
 - [x] v0.1 — synthetic filings, 3 task types, injection attacks, baseline, CI
-- [ ] v0.2 — run 3+ models (closed and open-weight), publish results table and failure analysis
+- [x] v0.2 (code) — provider-agnostic backend, rate limiting/retries, failure classification and reports
+- [ ] v0.2 (results) — run 3+ models, publish results table and failure analysis
 - [ ] v0.3 — real data: parse UK Companies House / SEC EDGAR filings into tasks
 - [ ] v0.4 — harder attacks (subtle number swaps, fake "corrections", multi-document injection) + defences (spotlighting, dual-LLM) with measured trade-offs
 - [ ] v0.5 — confidence calibration: does the agent know when it's wrong?

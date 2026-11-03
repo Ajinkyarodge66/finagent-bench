@@ -9,4 +9,4 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install pytest
       - run: python -m pytest -q
-      - run: python -m finagent_bench --agent baseline
+      - run: python -m finagent_bench

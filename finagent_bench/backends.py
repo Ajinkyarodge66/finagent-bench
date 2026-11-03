@@ -1,0 +1,91 @@
+"""Model backends. Any provider with an OpenAI-compatible chat endpoint works.
+
+Uses only the standard library (no SDK needed), throttles to stay under free-tier
+rate limits, and retries on 429/5xx honouring the server's Retry-After header.
+"""
+from __future__ import annotations
+
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+from typing import Callable
+
+# name -> (base_url, env var holding the API key, default requests-per-minute)
+PROVIDERS = {
+    "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", 25),
+    "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY", 10),
+    "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", 15),
+    "ollama": ("http://localhost:11434/v1", None, 0),  # local, no key, no throttle
+}
+
+Complete = Callable[[str, list[dict]], str]
+
+
+def openai_compat_backend(
+    provider: str,
+    model: str,
+    rpm: float | None = None,
+    max_retries: int = 6,
+    timeout: float = 120,
+    _urlopen=urllib.request.urlopen,  # injectable for tests
+) -> Complete:
+    if provider not in PROVIDERS:
+        raise ValueError(f"unknown provider {provider!r}; choose from {sorted(PROVIDERS)}")
+    base_url, key_env, default_rpm = PROVIDERS[provider]
+    key = os.environ.get(key_env) if key_env else None
+    if key_env and not key:
+        raise SystemExit(f"Set the {key_env} environment variable first (see README).")
+    rpm = default_rpm if rpm is None else rpm
+    min_gap = 60.0 / rpm if rpm else 0.0
+    last = [0.0]
+    usage = {"prompt_tokens": 0, "completion_tokens": 0, "requests": 0}
+
+    def complete(system: str, messages: list[dict]) -> str:
+        body = json.dumps({
+            "model": model,
+            "messages": [{"role": "system", "content": system}, *messages],
+            "temperature": 0,
+            "max_tokens": 1024,
+        }).encode()
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        for attempt in range(max_retries + 1):
+            wait = min_gap - (time.monotonic() - last[0])
+            if wait > 0:
+                time.sleep(wait)
+            last[0] = time.monotonic()
+            req = urllib.request.Request(f"{base_url}/chat/completions", body, headers)
+            try:
+                with _urlopen(req, timeout=timeout) as r:
+                    data = json.loads(r.read())
+                u = data.get("usage") or {}
+                usage["prompt_tokens"] += u.get("prompt_tokens", 0)
+                usage["completion_tokens"] += u.get("completion_tokens", 0)
+                usage["requests"] += 1
+                return data["choices"][0]["message"].get("content") or ""
+            except urllib.error.HTTPError as e:
+                if e.code in (429, 500, 502, 503, 504) and attempt < max_retries:
+                    retry_after = e.headers.get("Retry-After") if e.headers else None
+                    time.sleep(float(retry_after) if retry_after else min(2 ** attempt, 60))
+                    continue
+                detail = e.read()[:300].decode(errors="replace") if hasattr(e, "read") else ""
+                raise RuntimeError(f"HTTP {e.code}: {detail}") from e
+        raise RuntimeError("retries exhausted")
+
+    complete.usage = usage  # type: ignore[attr-defined]
+    return complete
+
+
+def anthropic_backend(model: str) -> Complete:
+    import anthropic  # optional dependency
+
+    client = anthropic.Anthropic()
+
+    def complete(system: str, messages: list[dict]) -> str:
+        r = client.messages.create(model=model, max_tokens=1024, system=system, messages=messages)
+        return "".join(b.text for b in r.content if b.type == "text")
+
+    return complete

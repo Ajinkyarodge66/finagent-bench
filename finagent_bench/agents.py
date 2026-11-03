@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass, field
 from typing import Callable
@@ -30,6 +29,7 @@ class AgentResult:
     steps: int
     trace: list[dict] = field(default_factory=list)
     error: str | None = None
+    transcript: list[dict] | None = None
 
 
 class BaselineAgent:
@@ -63,17 +63,21 @@ class BaselineAgent:
             return AgentResult(None, len(tb.log), tb.log, error=repr(e))
 
 
-def anthropic_backend(model: str | None = None) -> Callable[[str, list[dict]], str]:
-    import anthropic  # optional dependency
+def _first_json_object(text: str) -> dict | None:
+    """Return the first JSON object in `text` (models often wrap JSON in prose or code fences)."""
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch == "{":
+            try:
+                obj, _ = dec.raw_decode(text[i:])
+                if isinstance(obj, dict):
+                    return obj
+            except json.JSONDecodeError:
+                continue
+    return None
 
-    client = anthropic.Anthropic()
-    model = model or os.environ.get("FINAGENT_MODEL", "claude-sonnet-5-5")
 
-    def complete(system: str, messages: list[dict]) -> str:
-        r = client.messages.create(model=model, max_tokens=512, system=system, messages=messages)
-        return "".join(b.text for b in r.content if b.type == "text")
-
-    return complete
+ALLOWED_TOOLS = {"list_docs", "read_doc", "calculator"}
 
 
 class LLMAgent:
@@ -83,24 +87,34 @@ class LLMAgent:
     def run(self, task: Task) -> AgentResult:
         tb = Toolbox(task.docs)
         msgs = [{"role": "user", "content": task.question}]
+        res = self._loop(tb, msgs)
+        res.transcript = msgs
+        return res
+
+    def _loop(self, tb: Toolbox, msgs: list[dict]) -> AgentResult:
         for step in range(self.max_steps):
-            reply = self.complete(SYSTEM + Toolbox.SPEC, msgs)
-            msgs.append({"role": "assistant", "content": reply})
-            m = re.search(r"\{.*\}", reply, re.S)
-            if not m:
-                msgs.append({"role": "user", "content": "Reply with one JSON tool call."})
-                continue
             try:
-                call = json.loads(m.group(0))
-            except json.JSONDecodeError:
-                msgs.append({"role": "user", "content": "Invalid JSON. Try again."})
+                reply = self.complete(SYSTEM + Toolbox.SPEC, msgs)
+            except Exception as e:  # API failure: record it, don't crash the whole run
+                return AgentResult(None, step, tb.log, error=f"api_error: {e}")
+            msgs.append({"role": "assistant", "content": reply})
+            call = _first_json_object(reply)
+            if call is None:
+                msgs.append({"role": "user", "content": "Reply with exactly one JSON object."})
                 continue
             if "final_answer" in call:
                 try:
                     return AgentResult(float(call["final_answer"]), step + 1, tb.log)
                 except (TypeError, ValueError):
                     return AgentResult(None, step + 1, tb.log, error="non-numeric answer")
-            tool = getattr(tb, call.get("tool", ""), None)
-            obs = tool(call["arg"]) if tool and "arg" in call else tool() if tool else "ERROR: unknown tool"
+            name = call.get("tool")
+            if name not in ALLOWED_TOOLS:  # never let the model call arbitrary attributes
+                obs = f"ERROR: unknown tool {name!r}"
+            elif name == "list_docs":
+                obs = tb.list_docs()
+            elif "arg" not in call:
+                obs = f"ERROR: {name} needs an 'arg'"
+            else:
+                obs = getattr(tb, name)(str(call["arg"]))
             msgs.append({"role": "user", "content": f"Observation: {obs}"})
         return AgentResult(None, self.max_steps, tb.log, error="max steps exceeded")
