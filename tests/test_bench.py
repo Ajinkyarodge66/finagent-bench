@@ -135,3 +135,33 @@ def test_final_answer_tool_call():
     from finagent_bench.backends import tool_call_to_json
     out = tool_call_to_json({"function": {"name": "final_answer", "arguments": '{"value": 12.5}'}})
     assert json.loads(out) == {"final_answer": 12.5}
+
+
+def test_rejected_tool_call_is_recovered(monkeypatch):
+    """Groq returns 400 tool_use_failed for undeclared tools; the model must get to self-correct."""
+    monkeypatch.setenv("GROQ_API_KEY", "test")
+    body = json.dumps({"error": {"code": "tool_use_failed", "message": "x",
+                                 "failed_generation": '{"name": "answer", "arguments": {"value": 1}}'}}).encode()
+
+    def fake_urlopen(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 400, "bad", {}, io.BytesIO(body))
+
+    complete = openai_compat_backend("groq", "m", rpm=0, _urlopen=fake_urlopen)
+    assert json.loads(complete("s", [])) == {"tool": "answer"}
+
+
+def test_invalid_tool_is_logged_and_model_can_recover():
+    task = build_tasks()[0]
+    script = iter(['{"tool": "answer"}', f'{{"final_answer": {task.answer}}}'])
+    r = evaluate(LLMAgent(lambda s, m: next(script), name="x"), [task])
+    assert r["summary"]["accuracy"] == 1.0 and r["summary"]["invalid_tool_calls"] == 1
+
+
+def test_repeated_runs_report_spread():
+    from finagent_bench.evaluate import evaluate_repeated, to_markdown
+    task = build_tasks()[0]
+    answers = iter([task.answer, 0.0])
+    agent = LLMAgent(lambda s, m: f'{{"final_answer": {next(answers)}}}', name="flaky")
+    r = evaluate_repeated(agent, [task], 2)
+    assert r["summary"]["accuracy"] == 0.5 and r["summary"]["accuracy_range"] == [0.0, 1.0]
+    assert "(0%-100%)" in to_markdown([r]) and "n=2" in to_markdown([r])

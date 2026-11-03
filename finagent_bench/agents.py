@@ -109,7 +109,8 @@ class LLMAgent:
                     return AgentResult(None, step + 1, tb.log, error="non-numeric answer")
             name = call.get("tool")
             if name not in ALLOWED_TOOLS:  # never let the model call arbitrary attributes
-                obs = f"ERROR: unknown tool {name!r}"
+                tb.log.append({"tool": "INVALID", "arg": str(name)})
+                obs = f"ERROR: unknown tool {name!r}. Valid tools: {sorted(ALLOWED_TOOLS)} and final_answer."
             elif name == "list_docs":
                 obs = tb.list_docs()
             elif "arg" not in call:

@@ -57,6 +57,22 @@ def tool_call_to_json(call: dict) -> str:
     return json.dumps(out)
 
 
+def _recover_failed_generation(raw: bytes) -> str | None:
+    """Groq rejects calls to undeclared tools server-side (code `tool_use_failed`) but returns
+    the model's attempt. Hand that attempt back to the agent so it can reply "unknown tool"
+    and the model gets a chance to self-correct, as it would in a real agent framework."""
+    try:
+        err = json.loads(raw)["error"]
+        if err.get("code") != "tool_use_failed":
+            return None
+        gen = json.loads(err["failed_generation"])
+        args = gen.get("arguments", {})
+        return tool_call_to_json({"function": {"name": gen["name"],
+                                               "arguments": args if isinstance(args, str) else json.dumps(args)}})
+    except Exception:
+        return None
+
+
 def openai_compat_backend(
     provider: str,
     model: str,
@@ -106,11 +122,17 @@ def openai_compat_backend(
                     return tool_call_to_json(msg["tool_calls"][0])
                 return msg.get("content") or ""
             except urllib.error.HTTPError as e:
+                raw = e.read() if hasattr(e, "read") and e.fp is not None else b""
+                if e.code == 400:
+                    recovered = _recover_failed_generation(raw)
+                    if recovered is not None:  # model made an invalid tool call: let the agent handle it
+                        usage["requests"] += 1
+                        return recovered
                 if e.code in (429, 500, 502, 503, 504) and attempt < max_retries:
                     retry_after = e.headers.get("Retry-After") if e.headers else None
                     time.sleep(float(retry_after) if retry_after else min(2 ** attempt, 60))
                     continue
-                detail = e.read()[:300].decode(errors="replace") if hasattr(e, "read") else ""
+                detail = raw[:300].decode(errors="replace")
                 raise RuntimeError(f"HTTP {e.code}: {detail}") from e
         raise RuntimeError("retries exhausted")
 

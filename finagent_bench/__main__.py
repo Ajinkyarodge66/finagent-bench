@@ -13,7 +13,7 @@ import re
 
 from .agents import BaselineAgent, LLMAgent
 from .backends import PROVIDERS, anthropic_backend, openai_compat_backend
-from .evaluate import evaluate, failure_report, to_markdown
+from .evaluate import evaluate_repeated, failure_report, to_markdown
 from .tasks import build_tasks
 
 
@@ -27,6 +27,7 @@ def main() -> None:
     p.add_argument("--model", help="model id at the provider, e.g. openai/gpt-oss-20b")
     p.add_argument("--rpm", type=float, help="max requests per minute (default: safe value per provider)")
     p.add_argument("--limit", type=int, help="run only the first N tasks (quick smoke test)")
+    p.add_argument("--repeats", type=int, default=1, help="run each LLM N times and report the spread")
     p.add_argument("--max-steps", type=int, default=10)
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--injection-rate", type=float, default=0.3)
@@ -48,7 +49,8 @@ def main() -> None:
     results = []
     for ag in agents:
         print(f"Running {ag.name} ...", flush=True)
-        results.append(evaluate(ag, tasks))
+        n = 1 if isinstance(ag, BaselineAgent) else a.repeats  # baseline is deterministic
+        results.append(evaluate_repeated(ag, tasks, n))
     print("\n" + to_markdown(results))
 
     os.makedirs(a.outdir, exist_ok=True)

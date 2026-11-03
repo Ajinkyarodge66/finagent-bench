@@ -12,6 +12,10 @@ on:
         description: "Space-separated model ids"
         default: "openai/gpt-oss-20b openai/gpt-oss-120b"
         required: true
+      repeats:
+        description: "Runs per model (results vary between runs)"
+        default: "3"
+        required: true
       limit:
         description: "Run only the first N tasks (blank = all 20)"
         default: ""
@@ -25,7 +29,7 @@ concurrency: benchmark  # never run two at once (shared free-tier rate limits)
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,10 +42,11 @@ jobs:
           PROVIDER: ${{ inputs.provider }}
           MODELS: ${{ inputs.models }}
           LIMIT: ${{ inputs.limit }}
+          REPEATS: ${{ inputs.repeats }}
         run: |
           set -euo pipefail
-          extra=""
-          if [ -n "$LIMIT" ]; then extra="--limit $LIMIT"; fi
+          extra="--repeats $REPEATS"
+          if [ -n "$LIMIT" ]; then extra="$extra --limit $LIMIT"; fi
           first=1
           for m in $MODELS; do
             flags="$extra"
