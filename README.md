@@ -1,5 +1,7 @@
 # FinAgent-Bench
 
+![CI](https://github.com/Ajinkyarodge66/finagent-bench/actions/workflows/ci.yml/badge.svg)
+
 **A reproducible benchmark for tool-using LLM agents on financial documents — measuring accuracy *and* robustness to prompt injection.**
 
 LLM agents are being deployed to read filings, compute metrics and answer analyst questions. Two things matter in production: *does it get the number right*, and *can a malicious document hijack it*. FinAgent-Bench measures both.
@@ -8,7 +10,7 @@ LLM agents are being deployed to read filings, compute metrics and answer analys
 
 ```bash
 pip install pytest anthropic        # anthropic only needed for LLM agents
-pytest -q                           # 6 tests, runs offline
+python -m pytest -q                 # 6 tests, runs offline
 python -m finagent_bench --agent baseline
 export ANTHROPIC_API_KEY=...        # then compare a real model:
 python -m finagent_bench --agent baseline --agent anthropic --model <model-id>
