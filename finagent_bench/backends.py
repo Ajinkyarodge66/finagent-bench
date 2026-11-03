@@ -73,6 +73,39 @@ def _recover_failed_generation(raw: bytes) -> str | None:
         return None
 
 
+def to_native_messages(messages: list[dict]) -> list[dict]:
+    """Rebuild the agent's text history as proper tool-calling history.
+
+    The agent records tool calls as JSON text and results as "Observation: ..." user
+    turns. Replaying that as plain text teaches native-tool models to write JSON as text
+    instead of calling tools, so in native mode each call becomes an assistant
+    `tool_calls` entry and each observation a `tool` message with the matching id."""
+    out, pending = [], None
+    for i, m in enumerate(messages):
+        if m["role"] == "assistant":
+            try:
+                call = json.loads(m["content"])
+            except (json.JSONDecodeError, TypeError):
+                call = None
+            if isinstance(call, dict) and ("tool" in call or "final_answer" in call):
+                name = call.get("tool", "final_answer")
+                args = ({"value": call["final_answer"]} if name == "final_answer"
+                        else ({"arg": call["arg"]} if "arg" in call else {}))
+                pending = f"call_{i}"
+                out.append({"role": "assistant", "content": None, "tool_calls": [{
+                    "id": pending, "type": "function",
+                    "function": {"name": str(name), "arguments": json.dumps(args)}}]})
+                continue
+            pending = None
+            out.append(m)
+        elif pending and m["role"] == "user" and m["content"].startswith("Observation: "):
+            out.append({"role": "tool", "tool_call_id": pending, "content": m["content"][len("Observation: "):]})
+            pending = None
+        else:
+            out.append(m)
+    return out
+
+
 def openai_compat_backend(
     provider: str,
     model: str,
@@ -96,7 +129,8 @@ def openai_compat_backend(
     def complete(system: str, messages: list[dict]) -> str:
         body = json.dumps({
             "model": model,
-            "messages": [{"role": "system", "content": system}, *messages],
+            "messages": [{"role": "system", "content": system},
+                         *(to_native_messages(messages) if native_tools else messages)],
             "temperature": 0,
             "max_tokens": 2048,
             **({"tools": TOOLS, "tool_choice": "auto"} if native_tools else {}),
@@ -137,6 +171,7 @@ def openai_compat_backend(
         raise RuntimeError("retries exhausted")
 
     complete.usage = usage  # type: ignore[attr-defined]
+    complete.native_tools = native_tools  # type: ignore[attr-defined]  # tells the agent which prompt to use
     return complete
 
 

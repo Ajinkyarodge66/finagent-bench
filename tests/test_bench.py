@@ -165,3 +165,23 @@ def test_repeated_runs_report_spread():
     r = evaluate_repeated(agent, [task], 2)
     assert r["summary"]["accuracy"] == 0.5 and r["summary"]["accuracy_range"] == [0.0, 1.0]
     assert "(0%-100%)" in to_markdown([r]) and "n=2" in to_markdown([r])
+
+
+def test_history_is_rebuilt_as_native_tool_messages():
+    from finagent_bench.backends import to_native_messages
+    msgs = [{"role": "user", "content": "q"},
+            {"role": "assistant", "content": '{"tool": "read_doc", "arg": "a.txt"}'},
+            {"role": "user", "content": "Observation: hello"},
+            {"role": "assistant", "content": "thinking out loud"},
+            {"role": "user", "content": "Call one of the tools."}]
+    out = to_native_messages(msgs)
+    assert out[1]["tool_calls"][0]["function"] == {"name": "read_doc", "arguments": '{"arg": "a.txt"}'}
+    assert out[2] == {"role": "tool", "tool_call_id": out[1]["tool_calls"][0]["id"], "content": "hello"}
+    assert out[3]["content"] == "thinking out loud" and out[4]["role"] == "user"
+
+
+def test_native_backend_gets_native_prompt(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test")
+    from finagent_bench.agents import NATIVE_TOOLS_PROMPT
+    agent = LLMAgent(openai_compat_backend("groq", "m", rpm=0, _urlopen=None))
+    assert agent.native and NATIVE_TOOLS_PROMPT in agent.system and "Tools (reply" not in agent.system

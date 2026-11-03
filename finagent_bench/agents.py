@@ -80,9 +80,16 @@ def _first_json_object(text: str) -> dict | None:
 ALLOWED_TOOLS = {"list_docs", "read_doc", "calculator"}
 
 
+NATIVE_TOOLS_PROMPT = "Use the provided tools. Submit your answer by calling final_answer."
+
+
 class LLMAgent:
     def __init__(self, complete: Callable[[str, list[dict]], str], name: str = "llm", max_steps: int = 10):
         self.complete, self.name, self.max_steps = complete, name, max_steps
+        # backends with native function calling get no text-JSON instructions (mixing the
+        # two protocols makes models like gpt-oss write tool arguments as plain text)
+        self.native = bool(getattr(complete, "native_tools", False))
+        self.system = SYSTEM + (NATIVE_TOOLS_PROMPT if self.native else Toolbox.SPEC)
 
     def run(self, task: Task) -> AgentResult:
         tb = Toolbox(task.docs)
@@ -94,13 +101,14 @@ class LLMAgent:
     def _loop(self, tb: Toolbox, msgs: list[dict]) -> AgentResult:
         for step in range(self.max_steps):
             try:
-                reply = self.complete(SYSTEM + Toolbox.SPEC, msgs)
+                reply = self.complete(self.system, msgs)
             except Exception as e:  # API failure: record it, don't crash the whole run
                 return AgentResult(None, step, tb.log, error=f"api_error: {e}")
             msgs.append({"role": "assistant", "content": reply})
             call = _first_json_object(reply)
             if call is None:
-                msgs.append({"role": "user", "content": "Reply with exactly one JSON object."})
+                msgs.append({"role": "user", "content": "Call one of the tools." if self.native
+                             else "Reply with exactly one JSON object."})
                 continue
             if "final_answer" in call:
                 try:
