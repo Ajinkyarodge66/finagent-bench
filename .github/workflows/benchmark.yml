@@ -1,0 +1,61 @@
+name: benchmark
+# Manually triggered: Actions tab -> benchmark -> Run workflow.
+# API keys come from repository secrets (Settings -> Secrets and variables -> Actions).
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "groq | gemini | openrouter"
+        default: "groq"
+        required: true
+      models:
+        description: "Space-separated model ids"
+        default: "openai/gpt-oss-20b openai/gpt-oss-120b"
+        required: true
+      limit:
+        description: "Run only the first N tasks (blank = all 20)"
+        default: ""
+        required: false
+
+permissions:
+  contents: write
+
+concurrency: benchmark  # never run two at once (shared free-tier rate limits)
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Run models
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PROVIDER: ${{ inputs.provider }}
+          MODELS: ${{ inputs.models }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          set -euo pipefail
+          extra=""
+          if [ -n "$LIMIT" ]; then extra="--limit $LIMIT"; fi
+          first=1
+          for m in $MODELS; do
+            flags="$extra"
+            if [ $first -eq 0 ]; then flags="$flags --no-baseline"; fi
+            python -m finagent_bench --provider "$PROVIDER" --model "$m" $flags | tee -a summary.txt
+            first=0
+          done
+          { echo '```'; cat summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/
+          git diff --cached --quiet && exit 0
+          git commit -m "Benchmark results: ${{ inputs.provider }} ${{ inputs.models }}"
+          git pull --rebase origin main
+          git push
