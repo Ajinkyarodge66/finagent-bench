@@ -78,6 +78,8 @@ def test_backend_retries_on_429(monkeypatch):
     assert complete("sys", [{"role": "user", "content": "q"}]) == '{"final_answer": 1}'
     assert len(calls) == 2 and complete.usage["requests"] == 1
     assert calls[0].headers["Authorization"] == "Bearer test"
+    # Cloudflare (in front of Groq) rejects Python's default User-Agent with error 1010
+    assert calls[0].get_header("User-agent").startswith("finagent-bench/")
 
 
 def test_missing_key_gives_clear_error(monkeypatch):

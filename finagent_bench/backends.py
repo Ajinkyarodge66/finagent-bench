@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 from typing import Callable
 
+from . import __version__
+
 # name -> (base_url, env var holding the API key, default requests-per-minute)
 PROVIDERS = {
     "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", 25),
@@ -49,7 +51,7 @@ def openai_compat_backend(
             "temperature": 0,
             "max_tokens": 1024,
         }).encode()
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "User-Agent": f"finagent-bench/{__version__}"}
         if key:
             headers["Authorization"] = f"Bearer {key}"
         for attempt in range(max_retries + 1):
