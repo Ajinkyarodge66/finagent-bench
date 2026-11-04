@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable
 
+from .backends import QuotaExhausted
 from .tasks import Task
 from .tools import Toolbox
 
@@ -102,6 +103,8 @@ class LLMAgent:
         for step in range(self.max_steps):
             try:
                 reply = self.complete(self.system, msgs)
+            except QuotaExhausted:
+                raise  # abort the whole run: partial results would be misleading
             except Exception as e:  # API failure: record it, don't crash the whole run
                 return AgentResult(None, step, tb.log, error=f"api_error: {e}")
             msgs.append({"role": "assistant", "content": reply})

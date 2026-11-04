@@ -185,3 +185,15 @@ def test_native_backend_gets_native_prompt(monkeypatch):
     from finagent_bench.agents import NATIVE_TOOLS_PROMPT
     agent = LLMAgent(openai_compat_backend("groq", "m", rpm=0, _urlopen=None))
     assert agent.native and NATIVE_TOOLS_PROMPT in agent.system and "Tools (reply" not in agent.system
+
+
+def test_long_retry_after_aborts_instead_of_hanging(monkeypatch):
+    from finagent_bench.backends import QuotaExhausted
+    monkeypatch.setenv("GROQ_API_KEY", "test")
+
+    def fake_urlopen(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 429, "rate", {"Retry-After": "3600"}, None)
+
+    agent = LLMAgent(openai_compat_backend("groq", "m", rpm=0, _urlopen=fake_urlopen))
+    with pytest.raises(QuotaExhausted, match="quota"):
+        agent.run(build_tasks()[0])

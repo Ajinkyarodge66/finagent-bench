@@ -24,6 +24,12 @@ PROVIDERS = {
 
 Complete = Callable[[str, list[dict]], str]
 
+MAX_RETRY_WAIT_S = 120  # longer waits mean a daily quota is exhausted, not a burst limit
+
+
+class QuotaExhausted(Exception):
+    """Provider quota is used up; abort the run instead of silently waiting for hours."""
+
 # Native function-calling schemas. Models like gpt-oss are trained to emit real tool
 # calls and refuse to follow a plain-text JSON protocol, so we give them real tools and
 # translate each call back into the agent's JSON protocol.
@@ -164,7 +170,12 @@ def openai_compat_backend(
                         return recovered
                 if e.code in (429, 500, 502, 503, 504) and attempt < max_retries:
                     retry_after = e.headers.get("Retry-After") if e.headers else None
-                    time.sleep(float(retry_after) if retry_after else min(2 ** attempt, 60))
+                    wait_s = float(retry_after) if retry_after else min(2 ** attempt, 60)
+                    if e.code == 429 and wait_s > MAX_RETRY_WAIT_S:
+                        raise QuotaExhausted(
+                            f"{provider} rate limit asks to wait {wait_s / 60:.0f} min: daily quota "
+                            f"for {model} is probably used up. Try again later.") from e
+                    time.sleep(wait_s)
                     continue
                 detail = raw[:300].decode(errors="replace")
                 raise RuntimeError(f"HTTP {e.code}: {detail}") from e

@@ -12,7 +12,7 @@ import os
 import re
 
 from .agents import BaselineAgent, LLMAgent
-from .backends import PROVIDERS, anthropic_backend, openai_compat_backend
+from .backends import PROVIDERS, QuotaExhausted, anthropic_backend, openai_compat_backend
 from .evaluate import evaluate_repeated, failure_report, to_markdown
 from .tasks import build_tasks
 
@@ -50,7 +50,10 @@ def main() -> None:
     for ag in agents:
         print(f"Running {ag.name} ...", flush=True)
         n = 1 if isinstance(ag, BaselineAgent) else a.repeats  # baseline is deterministic
-        results.append(evaluate_repeated(ag, tasks, n))
+        try:
+            results.append(evaluate_repeated(ag, tasks, n))
+        except QuotaExhausted as e:
+            raise SystemExit(f"Stopped: {e}")
     print("\n" + to_markdown(results))
 
     os.makedirs(a.outdir, exist_ok=True)
