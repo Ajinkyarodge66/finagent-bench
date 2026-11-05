@@ -110,7 +110,11 @@ class LLMAgent:
             msgs.append({"role": "assistant", "content": reply})
             call = _first_json_object(reply)
             if call is None:
-                msgs.append({"role": "user", "content": "Call one of the tools." if self.native
+                # Be explicit: a vague "call a tool" makes some models restart the task
+                # instead of submitting the answer they already computed.
+                msgs.append({"role": "user", "content":
+                             "Do not answer in plain text. If you have the answer, call the final_answer "
+                             "tool with it now; otherwise call the next tool you need." if self.native
                              else "Reply with exactly one JSON object."})
                 continue
             if "final_answer" in call:

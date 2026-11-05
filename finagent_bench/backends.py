@@ -64,11 +64,15 @@ def tool_call_to_json(call: dict) -> str:
 
 
 def _recover_failed_generation(raw: bytes) -> str | None:
-    """Groq rejects calls to undeclared tools server-side (code `tool_use_failed`) but returns
-    the model's attempt. Hand that attempt back to the agent so it can reply "unknown tool"
+    """Groq rejects calls to undeclared tools server-side (code `tool_use_failed`) and output it
+    cannot parse (code `output_parse_failed`), but returns the model's attempt. Hand that attempt back to the agent so it can reply "unknown tool"
     and the model gets a chance to self-correct, as it would in a real agent framework."""
     try:
         err = json.loads(raw)["error"]
+        if err.get("code") == "output_parse_failed":
+            # the model wrote plain text where Groq expected a tool call; return the text so
+            # the agent can tell the model how to submit its answer
+            return str(err.get("failed_generation", ""))
         if err.get("code") != "tool_use_failed":
             return None
         gen = json.loads(err["failed_generation"])

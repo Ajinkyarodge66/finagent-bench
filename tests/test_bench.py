@@ -197,3 +197,27 @@ def test_long_retry_after_aborts_instead_of_hanging(monkeypatch):
     agent = LLMAgent(openai_compat_backend("groq", "m", rpm=0, _urlopen=fake_urlopen))
     with pytest.raises(QuotaExhausted, match="quota"):
         agent.run(build_tasks()[0])
+
+
+def test_unparsable_output_is_recovered_as_text(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test")
+    body = json.dumps({"error": {"code": "output_parse_failed", "message": "x",
+                                 "failed_generation": "The answer is 4.67"}}).encode()
+
+    def fake_urlopen(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 400, "bad", {}, io.BytesIO(body))
+
+    assert openai_compat_backend("groq", "m", rpm=0, _urlopen=fake_urlopen)("s", []) == "The answer is 4.67"
+
+
+def test_plain_text_answer_gets_explicit_nudge_and_model_recovers():
+    task = build_tasks()[0]
+
+    def model(system, msgs):
+        if msgs[-1]["role"] == "user" and "final_answer tool" in msgs[-1]["content"]:
+            return f'{{"final_answer": {task.answer}}}'
+        return "The answer is " + str(task.answer)
+
+    model.native_tools = True
+    r = evaluate(LLMAgent(model, name="texty"), [task])
+    assert r["summary"]["accuracy"] == 1.0 and r["rows"][0]["steps"] == 2
