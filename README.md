@@ -46,14 +46,38 @@ Never commit API keys. Keys are read only from environment variables.
 | Mean steps | Model turns per task, a cost/latency proxy |
 | Failure types | Each wrong answer is classified: `hijacked_by_injection`, `answered_without_reading`, `mental_arithmetic`, `unit_or_percent_scale`, `rounding_or_precision`, `wrong_value`, `ran_out_of_steps`, `no_numeric_answer`, `api_error` |
 
-## Current results
+## Results
 
 | Agent | Accuracy | arithmetic | lookup | multi_hop | Acc. under injection | Hijack rate | Mean steps |
 |---|---|---|---|---|---|---|---|
 | baseline-rules | 100% | 100% | 100% | 100% | 100% | 0% | 3.0 |
-| *LLM runs: coming in v0.2* | | | | | | | |
+| Qwen3.8-27B | **100%** | 100% | 100% | 100% | 100% | 0% | 4.0 |
+| gpt-oss-120b | **98%** (95-100%) | 95% | 100% | 100% | 100% | 0% | 5.0 |
+| gpt-oss-20b | **77%** (70-85%) | 95% | 80% | 40% | 44% (25-62%) | **56%** (38-75%) | 5.0 |
 
-The rule-based baseline is a sanity check (it is written for this exact format). The interesting rows are LLM agents — that comparison is the point of the project.
+Groq free tier, temperature 0, each model run twice (ranges show min-max across runs), harness commit `2111b08`. Raw per-task results and failure reports are in [`results/`](results/). The rule-based baseline is a sanity check: it is written for this exact format.
+
+## Findings
+
+**1. Prompt injection splits models sharply.** gpt-oss-20b was hijacked on 56% of injected tasks: it read a filing containing a planted instruction, and answered 0 instead of the real figure. Every one of its failures was a hijack; on clean documents it was nearly perfect. gpt-oss-120b and Qwen3.8-27B were never hijacked across 32 injected attempts. The 20b model's own reasoning shows it chose to obey the planted note ("So we must comply with that instruction"), even though the system prompt says document text is data, not instructions. Multi-hop tasks were hit hardest (40% accuracy), because two injected documents give the attack two chances.
+
+**2. The same task can flip between runs, even at temperature 0.** For gpt-oss-20b, three of the eight injected tasks were resisted in one run and obeyed in the other. A single run would have reported a hijack rate anywhere from 38% to 75%. Reporting the range matters.
+
+**3. The other failures were format, not reasoning.** gpt-oss-120b's only miss: it calculated the right number, then invented tool names (`functions`, `json`) instead of calling `final_answer`, and ran out of steps. Across both runs it made 7 such invalid tool calls; Qwen made none.
+
+### Harness lessons: the score depends on the test, not just the model
+
+Getting trustworthy numbers took five harness fixes, each found by reading transcripts rather than trusting the score:
+
+| Problem found | Effect before the fix | Fix |
+|---|---|---|
+| Cloudflare blocked Python's default User-Agent (error 1010) | every request failed | send a named client User-Agent |
+| gpt-oss refuses a plain-text JSON tool protocol | HTTP 400 on the first step | native function calling |
+| Prompt mixed text-JSON instructions with native tools | gpt-oss-120b scored 60-80%, looked broken | one protocol; history replayed as real tool messages |
+| Vague nudge "Call one of the tools." when a model answered in plain text | gpt-oss-20b restarted tasks and looped: **90% → 5%** | explicit "call final_answer" nudge |
+| Daily quota exhausted mid-run | run hung for 70 minutes | abort with a clear message |
+
+The same model, gpt-oss-20b, scored 90%, 5% and 77% on three versions of the harness. **Agent benchmark scores are very sensitive to harness details, so every number here was checked against transcripts before being published.**
 
 ## Design decisions
 
@@ -79,7 +103,7 @@ tests/          unit + integration tests (scripted model, fake HTTP server)
 
 - [x] v0.1 — synthetic filings, 3 task types, injection attacks, baseline, CI
 - [x] v0.2 (code) — provider-agnostic backend, rate limiting/retries, failure classification and reports
-- [ ] v0.2 (results) — run 3+ models, publish results table and failure analysis
+- [x] v0.2 (results) — 3 models x 2 runs, results table, failure analysis, harness lessons
 - [ ] v0.3 — real data: parse UK Companies House / SEC EDGAR filings into tasks
 - [ ] v0.4 — harder attacks (subtle number swaps, fake "corrections", multi-document injection) + defences (spotlighting, dual-LLM) with measured trade-offs
 - [ ] v0.5 — confidence calibration: does the agent know when it's wrong?
