@@ -50,10 +50,12 @@ TOOLS = [
 
 def tool_call_to_json(call: dict) -> str:
     """Translate an OpenAI-style tool call into the agent's JSON protocol."""
-    name = call["function"]["name"].split(".")[-1]  # some models prefix a namespace
+    name = str(call["function"].get("name") or "").split(".")[-1]  # some models prefix a namespace
     try:
         args = json.loads(call["function"].get("arguments") or "{}")
     except json.JSONDecodeError:
+        args = {}
+    if not isinstance(args, dict):  # models sometimes emit "arguments": null or a bare value
         args = {}
     if name == "final_answer":
         return json.dumps({"final_answer": args.get("value")})

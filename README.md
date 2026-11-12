@@ -9,7 +9,7 @@ LLM agents are being deployed to read filings, compute metrics and answer analys
 ## Quick start
 
 ```bash
-python -m pytest -q                 # 22 tests, runs offline, no API key
+python -m pytest -q                 # 23 tests, runs offline, no API key
 python -m finagent_bench            # offline baseline only
 ```
 

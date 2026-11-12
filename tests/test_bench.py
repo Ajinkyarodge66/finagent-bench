@@ -221,3 +221,10 @@ def test_plain_text_answer_gets_explicit_nudge_and_model_recovers():
     model.native_tools = True
     r = evaluate(LLMAgent(model, name="texty"), [task])
     assert r["summary"]["accuracy"] == 1.0 and r["rows"][0]["steps"] == 2
+
+
+def test_malformed_tool_call_arguments_do_not_crash():
+    from finagent_bench.backends import tool_call_to_json
+    assert json.loads(tool_call_to_json({"function": {"name": "read_doc", "arguments": "null"}})) == {"tool": "read_doc"}
+    assert json.loads(tool_call_to_json({"function": {"name": "calculator", "arguments": "5"}})) == {"tool": "calculator"}
+    assert json.loads(tool_call_to_json({"function": {"name": None, "arguments": "{}"}})) == {"tool": ""}
