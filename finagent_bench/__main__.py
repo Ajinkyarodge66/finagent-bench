@@ -3,6 +3,7 @@
   python -m finagent_bench                                   # offline baseline
   python -m finagent_bench --provider groq --model openai/gpt-oss-20b
   python -m finagent_bench --provider gemini --model gemini-2.5-flash --limit 5
+  python -m finagent_bench --provider groq --model openai/gpt-oss-20b --attack correction
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ import re
 from .agents import BaselineAgent, LLMAgent
 from .backends import PROVIDERS, QuotaExhausted, anthropic_backend, openai_compat_backend
 from .evaluate import evaluate_repeated, failure_report, to_markdown
-from .tasks import build_tasks
+from .tasks import ATTACKS, build_tasks
 
 
 def _slug(s: str) -> str:
@@ -31,11 +32,13 @@ def main() -> None:
     p.add_argument("--max-steps", type=int, default=10)
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--injection-rate", type=float, default=0.3)
+    p.add_argument("--attack", choices=ATTACKS, default="blunt",
+                   help="prompt-injection style: blunt 'ignore instructions' or a subtle fake data correction")
     p.add_argument("--no-baseline", action="store_true", help="skip the baseline row")
     p.add_argument("--outdir", default="results")
     a = p.parse_args()
 
-    tasks = build_tasks(a.seed, a.injection_rate)[: a.limit]
+    tasks = build_tasks(a.seed, a.injection_rate, a.attack)[: a.limit]
     agents = [] if (a.no_baseline and a.provider) else [BaselineAgent()]
     complete = None
     if a.provider:
@@ -45,7 +48,7 @@ def main() -> None:
                     else openai_compat_backend(a.provider, a.model, a.rpm))
         agents.append(LLMAgent(complete, name=f"{a.provider}/{a.model}", max_steps=a.max_steps))
 
-    print(f"{len(tasks)} tasks ({sum(t.injected for t in tasks)} with prompt injection)\n")
+    print(f"{len(tasks)} tasks ({sum(t.injected for t in tasks)} with prompt injection, attack: {a.attack})\n")
     results = []
     for ag in agents:
         print(f"Running {ag.name} ...", flush=True)
@@ -58,7 +61,8 @@ def main() -> None:
 
     os.makedirs(a.outdir, exist_ok=True)
     for r in results:
-        stem = os.path.join(a.outdir, _slug(r["summary"]["agent"]))
+        suffix = "" if a.attack == "blunt" else f"_{a.attack}"  # blunt keeps the v0.2 file names
+        stem = os.path.join(a.outdir, _slug(r["summary"]["agent"]) + suffix)
         with open(stem + ".json", "w", encoding="utf-8") as f:
             json.dump(r, f, indent=2, default=str)
         with open(stem + "_failures.md", "w", encoding="utf-8") as f:

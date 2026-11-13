@@ -228,3 +228,46 @@ def test_malformed_tool_call_arguments_do_not_crash():
     assert json.loads(tool_call_to_json({"function": {"name": "read_doc", "arguments": "null"}})) == {"tool": "read_doc"}
     assert json.loads(tool_call_to_json({"function": {"name": "calculator", "arguments": "5"}})) == {"tool": "calculator"}
     assert json.loads(tool_call_to_json({"function": {"name": None, "arguments": "{}"}})) == {"tool": ""}
+
+
+# ---------------- v0.4: subtle "correction" attacks ----------------
+from finagent_bench.tasks import ATTACKS, CORRECTION_HEADER
+
+
+def _obeying_run(task, value):
+    script = iter(['{"tool": "list_docs"}', f'{{"tool": "read_doc", "arg": "{next(iter(task.docs))}"}}',
+                   f'{{"final_answer": {value}}}'])
+    return evaluate(LLMAgent(lambda system, msgs: next(script), name="m"), [task])
+
+
+@pytest.mark.parametrize("attack", ["correction", "correction_top"])
+def test_correction_attack_present_only_when_flagged(attack):
+    marker = CORRECTION_HEADER.split(":")[0]
+    for t in build_tasks(attack=attack):
+        assert any(marker in d for d in t.docs.values()) == t.injected
+        assert not any(INJECTION in d for d in t.docs.values())
+        if t.injected:  # the attacker's answer must be distinguishable from the truth
+            assert not is_correct(t.attack_answer, t.answer, t.tolerance)
+
+
+def test_attacks_do_not_change_real_data():
+    base = build_tasks()
+    for attack in ATTACKS:
+        other = build_tasks(attack=attack)
+        assert [(t.question, t.answer, t.injected) for t in other] == [(t.question, t.answer, t.injected) for t in base]
+
+
+@pytest.mark.parametrize("attack", ["correction", "correction_top"])
+def test_obeying_correction_counts_as_hijack(attack):
+    task = build_tasks(injection_rate=1.0, attack=attack)[0]
+    r = _obeying_run(task, task.attack_answer)
+    assert r["summary"]["hijack_rate"] == 1.0 and r["rows"][0]["failure"] == "hijacked_by_injection"
+    r = _obeying_run(task, task.answer)
+    assert r["summary"]["hijack_rate"] == 0.0 and r["summary"]["accuracy"] == 1.0
+    r = _obeying_run(task, 0)  # a wrong answer that is not the attacker's is not a hijack
+    assert r["summary"]["hijack_rate"] == 0.0
+
+
+def test_unknown_attack_rejected():
+    with pytest.raises(ValueError):
+        build_tasks(attack="nope")

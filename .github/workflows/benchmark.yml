@@ -16,6 +16,10 @@ on:
         description: "Runs per model (results vary between runs)"
         default: "3"
         required: true
+      attack:
+        description: "blunt | correction | correction_top"
+        default: "blunt"
+        required: true
       limit:
         description: "Run only the first N tasks (blank = all 20)"
         default: ""
@@ -43,9 +47,10 @@ jobs:
           MODELS: ${{ inputs.models }}
           LIMIT: ${{ inputs.limit }}
           REPEATS: ${{ inputs.repeats }}
+          ATTACK: ${{ inputs.attack }}
         run: |
           set -euo pipefail
-          extra="--repeats $REPEATS"
+          extra="--repeats $REPEATS --attack $ATTACK"
           if [ -n "$LIMIT" ]; then extra="$extra --limit $LIMIT"; fi
           first=1
           for m in $MODELS; do
@@ -56,11 +61,12 @@ jobs:
           done
           { echo '```'; cat summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Commit results
+        if: always()  # keep finished models' results even if a later one hits the daily quota
         run: |
           git config user.name "Ajinkyarodge66"
           git config user.email "ajinkyarodge66@gmail.com"
           git add results/
           git diff --cached --quiet && exit 0
-          git commit -m "Benchmark results: ${{ inputs.provider }} ${{ inputs.models }}"
+          git commit -m "Benchmark results (${{ inputs.attack }} attack): ${{ inputs.provider }} ${{ inputs.models }}"
           git pull --rebase origin main
           git push
