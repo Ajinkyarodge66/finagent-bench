@@ -9,7 +9,7 @@ LLM agents are being deployed to read filings, compute metrics and answer analys
 ## Quick start
 
 ```bash
-python -m pytest -q                 # 23 tests, runs offline, no API key
+python -m pytest -q                 # 29 tests, runs offline, no API key
 python -m finagent_bench            # offline baseline only
 ```
 
@@ -54,8 +54,9 @@ Never commit API keys. Keys are read only from environment variables.
 | Qwen3.8-27B | **100%** | 100% | 100% | 100% | 100% | 0% | 4.0 |
 | gpt-oss-120b | **98%** (95-100%) | 95% | 100% | 100% | 100% | 0% | 5.0 |
 | gpt-oss-20b | **77%** (70-85%) | 95% | 80% | 40% | 44% (25-62%) | **56%** (38-75%) | 5.0 |
+| Qwen2.5-0.5B + LoRA ([FinAgent-LoRA](https://github.com/Ajinkyarodge66/finagent-lora)) | **100%** | 100% | 100% | 100% | 100% | 0% | 4.0 |
 
-Groq free tier, temperature 0, each model run twice (ranges show min-max across runs), harness commit `2111b08`. Raw per-task results and failure reports are in [`results/`](results/). The rule-based baseline is a sanity check: it is written for this exact format.
+Groq free tier, temperature 0, each model run twice (ranges show min-max across runs), harness commit `2111b08`. Raw per-task results and failure reports are in [`results/`](results/). The rule-based baseline is a sanity check: it is written for this exact format. The last row is a 0.5B model fine-tuned on this task format in the companion project [FinAgent-LoRA](https://github.com/Ajinkyarodge66/finagent-lora): one greedy run on CPU, in-distribution, so not a like-for-like comparison with general-purpose models.
 
 ## Findings
 
