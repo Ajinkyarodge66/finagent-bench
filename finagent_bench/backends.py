@@ -24,7 +24,7 @@ PROVIDERS = {
 
 Complete = Callable[[str, list[dict]], str]
 
-MAX_RETRY_WAIT_S = 120  # longer waits mean a daily quota is exhausted, not a burst limit
+MAX_RETRY_WAIT_S = 300  # longer waits mean a daily quota is exhausted, not a burst limit
 
 
 class QuotaExhausted(Exception):
