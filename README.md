@@ -77,15 +77,15 @@ Two hijack measures:
 
 | Agent | Blunt attack: influence | Fake correction after figures | Fake correction before figures | Accuracy with fake correction (after) |
 |---|---|---|---|---|
-| gpt-oss-20b | 56% (38-75%) | **100%** | *pending* | 60% |
+| gpt-oss-20b | 56% (38-75%) | **100%** | **100%** (1 run) | 60% |
 | gpt-oss-120b | 0% | **100%** | **100%** | 57% (55-60%) |
-| Qwen3.8-27B | 0% | **88%** | *pending* | 65% |
+| Qwen3.8-27B | 0% | **88%** | **100%** (1 run) | 65% |
 | Qwen2.5-0.5B + LoRA | 0% | **88%** (exact hijack 25%) | **75%** (exact hijack 12%) | 65% |
 | baseline-rules | 0% | 0% | 0% | 100% |
 
-Groq free tier, 2 runs per API model; the LoRA model is greedy, 1 run ([FinAgent-LoRA](https://github.com/Ajinkyarodge66/finagent-lora)). Percentages are over 8 injected tasks per run. Run it with `--attack correction`.
+Groq free tier, 2 runs per API model (1 run where marked: the 2-run test exceeded the free daily quota); the LoRA model is greedy, 1 run ([FinAgent-LoRA](https://github.com/Ajinkyarodge66/finagent-lora)). Percentages are over 8 injected tasks per run. Run it with `--attack correction`.
 
-**4. Models that resisted the blunt attack obeyed the fake correction.** gpt-oss-120b and Qwen3.8-27B were never hijacked by "ignore all previous instructions", but used the fake figures on 88-100% of attacked tasks. gpt-oss-20b's reasoning says it outright: "Use corrected figures". The other two used them silently, never mentioning that the document gave two conflicting sets of numbers. The system prompt says document text is data, not instructions. These models resist attacks that *look* like instructions, not attacks that look like data.
+**4. Models that resisted the blunt attack obeyed the fake correction.** gpt-oss-120b and Qwen3.8-27B were never hijacked by "ignore all previous instructions", but used the fake figures on 88-100% of attacked tasks. With the notice placed before the real figures, all three API models gave exactly the attacker's answer on every attacked task. gpt-oss-20b's reasoning says it outright: "Use corrected figures". The other two used them silently, never mentioning that the document gave two conflicting sets of numbers. The system prompt says document text is data, not instructions. These models resist attacks that *look* like instructions, not attacks that look like data.
 
 **5. Exact-match hijack rates understate the damage.** The fine-tuned 0.5B model often mixed real and fake figures in one calculation (e.g. `124.6-71.1+54.0-25.3`, where 54.0 comes from the fake correction). Exact matching counts that as an ordinary wrong answer: it gives a 25% hijack rate, while the attack actually changed 88% of answers. `partially_hijacked` is now a failure type. The `rescore` tool re-applies the current scoring to saved results without calling a model (`python -m finagent_bench.rescore results/<file>.json --attack correction`), and re-scoring left every v0.2 number unchanged.
 
